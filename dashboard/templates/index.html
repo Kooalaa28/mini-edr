@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini-EDR Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0f172a; color: #e2e8f0; font-family: 'Courier New', monospace; }
+    .card  { background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; }
+    .badge-running  { background: #14532d; color: #4ade80; border: 1px solid #16a34a; }
+    .badge-stopped  { background: #1c1917; color: #78716c; border: 1px solid #44403c; }
+    .badge-error    { background: #450a0a; color: #f87171; border: 1px solid #dc2626; }
+    .btn-green  { background: #15803d; color: #fff; }
+    .btn-green:hover  { background: #166534; }
+    .btn-red    { background: #b91c1c; color: #fff; }
+    .btn-red:hover    { background: #991b1b; }
+    .btn-slate  { background: #334155; color: #e2e8f0; }
+    .btn-slate:hover  { background: #475569; }
+    .score-high   { color: #f87171; }
+    .score-mid    { color: #fb923c; }
+    .score-low    { color: #facc15; }
+    .tag { display: inline-flex; align-items: center; gap: 4px; background: #0f172a;
+           border: 1px solid #334155; border-radius: 9999px; padding: 2px 10px;
+           font-size: 0.75rem; margin: 2px; }
+    .tag button { color: #64748b; cursor: pointer; font-size: 0.9rem; line-height: 1; }
+    .tag button:hover { color: #f87171; }
+    input[type=text], input[type=number] {
+      background: #0f172a; border: 1px solid #334155; border-radius: 0.375rem;
+      color: #e2e8f0; padding: 0.35rem 0.6rem; font-size: 0.8rem;
+    }
+    input:focus { outline: 1px solid #3b82f6; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .alert-row { border-left: 3px solid #334155; transition: border-color 0.2s; }
+    .alert-row:hover { border-left-color: #f87171; background: #162032; }
+    .feat-badge { background: #172554; color: #93c5fd; border: 1px solid #1d4ed8;
+                  border-radius: 4px; padding: 1px 6px; font-size: 0.7rem; margin: 1px; display: inline-block; }
+    .feat-badge.binary { background: #450a0a; color: #fca5a5; border-color: #b91c1c; }
+  </style>
+</head>
+<body class="min-h-screen p-4">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl font-bold text-slate-100">&#x1F6E1; Mini-EDR</span>
+      <span id="status-badge" class="badge-stopped px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">Stopped</span>
+    </div>
+    <div class="text-xs text-slate-500" id="last-cycle">—</div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+    <!-- LEFT COLUMN -->
+    <div class="flex flex-col gap-4">
+
+      <!-- Stats -->
+      <div class="card p-4">
+        <div class="text-xs text-slate-400 uppercase tracking-wider mb-3">Stats</div>
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div>
+            <div id="stat-cycles" class="text-2xl font-bold text-slate-100">0</div>
+            <div class="text-xs text-slate-500">Cycles</div>
+          </div>
+          <div>
+            <div id="stat-procs" class="text-2xl font-bold text-slate-100">0</div>
+            <div class="text-xs text-slate-500">Processes</div>
+          </div>
+          <div>
+            <div id="stat-alerts" class="text-2xl font-bold text-red-400">0</div>
+            <div class="text-xs text-slate-500">Alerts</div>
+          </div>
+        </div>
+        <div id="error-msg" class="hidden mt-3 text-xs text-red-400 bg-red-950 border border-red-800 rounded p-2"></div>
+      </div>
+
+      <!-- Controls -->
+      <div class="card p-4">
+        <div class="text-xs text-slate-400 uppercase tracking-wider mb-3">Monitor Settings</div>
+        <div class="flex flex-col gap-2">
+          <div class="flex gap-2 items-center">
+            <label class="text-xs text-slate-400 w-20 shrink-0">Model</label>
+            <input type="text" id="cfg-model" value="models/detector.joblib" class="flex-1 min-w-0">
+          </div>
+          <div class="flex gap-2 items-center">
+            <label class="text-xs text-slate-400 w-20 shrink-0">Threshold</label>
+            <input type="number" id="cfg-threshold" placeholder="saved" min="0" max="1" step="0.05" class="flex-1 min-w-0">
+          </div>
+          <div class="flex gap-2 items-center">
+            <label class="text-xs text-slate-400 w-20 shrink-0">Interval (s)</label>
+            <input type="number" id="cfg-interval" value="5" min="1" step="1" class="flex-1 min-w-0">
+          </div>
+          <div class="flex gap-2 items-center">
+            <label class="text-xs text-slate-400 w-20 shrink-0">Log file</label>
+            <input type="text" id="cfg-log" value="alerts.jsonl" class="flex-1 min-w-0">
+          </div>
+          <button onclick="saveSettings()" class="btn-slate mt-1 px-3 py-1.5 rounded text-xs font-semibold">Save settings</button>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button id="btn-start" onclick="startMonitor()"
+            class="btn-green flex-1 px-3 py-2 rounded text-sm font-bold">&#x25B6; Start</button>
+          <button id="btn-stop" onclick="stopMonitor()"
+            class="btn-red flex-1 px-3 py-2 rounded text-sm font-bold" disabled>&#x25A0; Stop</button>
+        </div>
+      </div>
+
+      <!-- Known process names -->
+      <div class="card p-4">
+        <div class="text-xs text-slate-400 uppercase tracking-wider mb-2">Known Process Names</div>
+        <p class="text-xs text-slate-500 mb-2">Processes NOT in this list get <code class="text-slate-300">is_unknown_name = 1</code>.</p>
+        <div class="flex gap-2 mb-2">
+          <input type="text" id="new-name" placeholder="process name" class="flex-1 min-w-0" onkeydown="if(event.key==='Enter') addName()">
+          <button onclick="addName()" class="btn-green px-3 py-1 rounded text-xs font-bold">Add</button>
+        </div>
+        <div id="names-list" class="max-h-40 overflow-y-auto leading-loose">
+          <span class="text-xs text-slate-600">Loading…</span>
+        </div>
+      </div>
+
+      <!-- Common ports -->
+      <div class="card p-4">
+        <div class="text-xs text-slate-400 uppercase tracking-wider mb-2">Common Ports</div>
+        <p class="text-xs text-slate-500 mb-2">Connections to ports NOT in this list get <code class="text-slate-300">rare_port = 1</code>.</p>
+        <div class="flex gap-2 mb-2">
+          <input type="number" id="new-port" placeholder="port" min="1" max="65535" class="w-24" onkeydown="if(event.key==='Enter') addPort()">
+          <button onclick="addPort()" class="btn-green px-3 py-1 rounded text-xs font-bold">Add</button>
+        </div>
+        <div id="ports-list" class="max-h-40 overflow-y-auto leading-loose">
+          <span class="text-xs text-slate-600">Loading…</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN — Alerts -->
+    <div class="lg:col-span-2 card p-4 flex flex-col" style="min-height: 600px;">
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-xs text-slate-400 uppercase tracking-wider">Alert Feed</div>
+        <button onclick="clearAlerts()" class="btn-slate px-3 py-1 rounded text-xs">Clear view</button>
+      </div>
+      <div id="alerts-container" class="flex-1 overflow-y-auto flex flex-col gap-2">
+        <div class="text-xs text-slate-600 mt-8 text-center">No alerts yet — start the monitor to begin scanning.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // -----------------------------------------------------------------
+    // State
+    // -----------------------------------------------------------------
+    let localAlerts = [];
+    let knownAlertIds = new Set();
+    let polling = null;
+
+    // -----------------------------------------------------------------
+    // Polling
+    // -----------------------------------------------------------------
+    function startPolling() {
+      if (polling) return;
+      polling = setInterval(tick, 2000);
+      tick();
+    }
+
+    async function tick() {
+      await Promise.all([fetchStatus(), fetchAlerts()]);
+    }
+
+    async function fetchStatus() {
+      try {
+        const r = await fetch('/api/status');
+        const d = await r.json();
+        updateStatus(d);
+      } catch {}
+    }
+
+    async function fetchAlerts() {
+      try {
+        const r = await fetch('/api/alerts?limit=50');
+        const list = await r.json();
+        let added = false;
+        for (const a of list) {
+          if (!knownAlertIds.has(a.alert_id)) {
+            knownAlertIds.add(a.alert_id);
+            localAlerts.unshift(a);
+            added = true;
+          }
+        }
+        if (added) renderAlerts();
+      } catch {}
+    }
+
+    // -----------------------------------------------------------------
+    // Status
+    // -----------------------------------------------------------------
+    function updateStatus(d) {
+      const badge = document.getElementById('status-badge');
+      const cls = { running: 'badge-running', stopped: 'badge-stopped', error: 'badge-error' };
+      badge.className = `${cls[d.status] || 'badge-stopped'} px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider`;
+      badge.textContent = d.status;
+
+      document.getElementById('stat-cycles').textContent = d.cycles;
+      document.getElementById('stat-procs').textContent  = d.processes_last_cycle;
+      document.getElementById('stat-alerts').textContent = d.total_alerts;
+      document.getElementById('last-cycle').textContent  = d.last_cycle_utc ? `Last cycle: ${d.last_cycle_utc}` : '—';
+
+      const errEl = document.getElementById('error-msg');
+      if (d.error_message) {
+        errEl.textContent = d.error_message;
+        errEl.classList.remove('hidden');
+      } else {
+        errEl.classList.add('hidden');
+      }
+
+      document.getElementById('btn-start').disabled = d.status === 'running';
+      document.getElementById('btn-stop').disabled  = d.status !== 'running';
+
+      // Sync settings fields on first load
+      if (d.model_path && !document.getElementById('cfg-model')._synced) {
+        document.getElementById('cfg-model').value    = d.model_path;
+        document.getElementById('cfg-interval').value = d.interval;
+        document.getElementById('cfg-log').value      = d.log_path || '';
+        if (d.threshold !== null && d.threshold !== undefined)
+          document.getElementById('cfg-threshold').value = d.threshold;
+        document.getElementById('cfg-model')._synced = true;
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // Alerts
+    // -----------------------------------------------------------------
+    function renderAlerts() {
+      const container = document.getElementById('alerts-container');
+      if (localAlerts.length === 0) {
+        container.innerHTML = '<div class="text-xs text-slate-600 mt-8 text-center">No alerts yet.</div>';
+        return;
+      }
+      container.innerHTML = localAlerts.map(a => alertHTML(a)).join('');
+    }
+
+    function scoreClass(s) {
+      if (s >= 0.85) return 'score-high';
+      if (s >= 0.7)  return 'score-mid';
+      return 'score-low';
+    }
+
+    function scoreBar(s) {
+      const filled = Math.round(s * 10);
+      return '█'.repeat(filled) + '░'.repeat(10 - filled);
+    }
+
+    function alertHTML(a) {
+      const sc = scoreClass(a.anomaly_score);
+      const features = (a.top_features || []).map(f => {
+        const isBinary = f.value === 1.0;
+        return `<span class="feat-badge ${isBinary ? 'binary' : ''}" title="${f.reason}">${f.feature}</span>`;
+      }).join('');
+      const cmd = (a.cmdline || []).join(' ');
+      return `
+        <div class="alert-row p-3 rounded cursor-default">
+          <div class="flex items-start justify-between gap-2 flex-wrap">
+            <div>
+              <span class="text-slate-300 font-bold">${esc(a.name)}</span>
+              <span class="text-slate-500 text-xs ml-2">pid ${a.pid}</span>
+            </div>
+            <div class="text-right">
+              <span class="${sc} font-bold font-mono">${a.anomaly_score.toFixed(3)}</span>
+              <span class="${sc} text-xs ml-1 font-mono">${scoreBar(a.anomaly_score)}</span>
+            </div>
+          </div>
+          ${a.exe ? `<div class="text-xs text-slate-400 mt-1 truncate">exe: ${esc(a.exe)}</div>` : ''}
+          ${cmd    ? `<div class="text-xs text-slate-500 mt-0.5 truncate">cmd: ${esc(cmd)}</div>` : ''}
+          <div class="mt-1">${features}</div>
+          <div class="text-xs text-slate-600 mt-1">${a.timestamp_utc}</div>
+        </div>`;
+    }
+
+    function clearAlerts() {
+      localAlerts = [];
+      knownAlertIds = new Set();
+      renderAlerts();
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // -----------------------------------------------------------------
+    // Monitor control
+    // -----------------------------------------------------------------
+    async function startMonitor() {
+      const body = {
+        model_path: document.getElementById('cfg-model').value,
+        interval:   parseFloat(document.getElementById('cfg-interval').value) || 5,
+        log_path:   document.getElementById('cfg-log').value,
+        threshold:  document.getElementById('cfg-threshold').value || null,
+      };
+      const r = await fetch('/api/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const d = await r.json();
+      if (!d.ok) alert(d.error);
+      else await fetchStatus();
+    }
+
+    async function stopMonitor() {
+      const r = await fetch('/api/stop', {method:'POST'});
+      const d = await r.json();
+      if (!d.ok) alert(d.error);
+      else await fetchStatus();
+    }
+
+    async function saveSettings() {
+      const body = {
+        model_path: document.getElementById('cfg-model').value,
+        interval:   parseFloat(document.getElementById('cfg-interval').value) || 5,
+        log_path:   document.getElementById('cfg-log').value,
+        threshold:  document.getElementById('cfg-threshold').value || null,
+      };
+      await fetch('/api/config/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    }
+
+    // -----------------------------------------------------------------
+    // Config — names
+    // -----------------------------------------------------------------
+    async function loadConfig() {
+      const r = await fetch('/api/config');
+      const d = await r.json();
+      renderNames(d.known_names);
+      renderPorts(d.common_ports);
+    }
+
+    function renderNames(names) {
+      const el = document.getElementById('names-list');
+      if (!names.length) { el.innerHTML = '<span class="text-xs text-slate-600">Empty</span>'; return; }
+      el.innerHTML = names.map(n =>
+        `<span class="tag"><span>${esc(n)}</span><button onclick="removeName('${esc(n)}')" title="Remove">&times;</button></span>`
+      ).join('');
+    }
+
+    function renderPorts(ports) {
+      const el = document.getElementById('ports-list');
+      if (!ports.length) { el.innerHTML = '<span class="text-xs text-slate-600">Empty</span>'; return; }
+      el.innerHTML = ports.map(p =>
+        `<span class="tag"><span>${p}</span><button onclick="removePort(${p})" title="Remove">&times;</button></span>`
+      ).join('');
+    }
+
+    async function addName() {
+      const input = document.getElementById('new-name');
+      const name = input.value.trim();
+      if (!name) return;
+      await fetch('/api/config/names/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name})});
+      input.value = '';
+      await loadConfig();
+    }
+
+    async function removeName(name) {
+      await fetch('/api/config/names/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name})});
+      await loadConfig();
+    }
+
+    async function addPort() {
+      const input = document.getElementById('new-port');
+      const port = parseInt(input.value);
+      if (!port) return;
+      await fetch('/api/config/ports/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({port})});
+      input.value = '';
+      await loadConfig();
+    }
+
+    async function removePort(port) {
+      await fetch('/api/config/ports/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({port})});
+      await loadConfig();
+    }
+
+    // -----------------------------------------------------------------
+    // Init
+    // -----------------------------------------------------------------
+    loadConfig();
+    startPolling();
+  </script>
+</body>
+</html>
